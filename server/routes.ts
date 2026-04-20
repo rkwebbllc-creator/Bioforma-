@@ -177,9 +177,26 @@ export function registerRoutes(httpServer: ReturnType<typeof createServer>, app:
     const { email } = req.body as { email: string };
     if (!email) return res.status(400).json({ error: "Email required" });
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email.toLowerCase().trim());
+      const { error } = await supabase.auth.resetPasswordForEmail(email.toLowerCase().trim(), {
+        redirectTo: 'https://bioforma.dev/reset-password',
+      });
       if (error) return res.status(400).json({ error: error.message });
       res.json({ ok: true, message: "If an account exists with that email, a reset link has been sent." });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // POST /api/auth/reset-password — update password using recovery token
+  app.post("/api/auth/reset-password", async (req, res) => {
+    const { accessToken, newPassword } = req.body as { accessToken: string; newPassword: string };
+    if (!accessToken || !newPassword) return res.status(400).json({ error: "accessToken and newPassword required" });
+    if (newPassword.length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
+    try {
+      const client = createUserClient(accessToken);
+      const { error } = await client.auth.updateUser({ password: newPassword });
+      if (error) return res.status(400).json({ error: error.message });
+      res.json({ ok: true, message: "Password updated successfully" });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }

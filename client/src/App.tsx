@@ -28,6 +28,7 @@ import Onboarding from "@/pages/Onboarding";
 import NotFound from "@/pages/not-found";
 import PrivacyPolicy from "@/pages/PrivacyPolicy";
 import TermsOfService from "@/pages/TermsOfService";
+import ResetPassword from "@/pages/ResetPassword";
 
 const NAV_ITEMS = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard, color: "hsl(142 65% 44%)", bg: "hsl(142 65% 44% / 0.12)" },
@@ -295,6 +296,7 @@ function AppShell() {
       <Switch>
         <Route path="/login" component={Login} />
         <Route path="/signup" component={Signup} />
+        <Route path="/reset-password" component={ResetPassword} />
         <Route path="/privacy" component={PrivacyPolicy} />
         <Route path="/terms" component={TermsOfService} />
         <Route component={Login} />
@@ -322,6 +324,7 @@ function AppShell() {
           <Route path="/calculator" component={PeptideCalculator} />
           <Route path="/research" component={Research} />
           {/* Legal pages — publicly accessible */}
+          <Route path="/reset-password" component={ResetPassword} />
           <Route path="/privacy" component={PrivacyPolicy} />
           <Route path="/terms" component={TermsOfService} />
           {/* Catch login/signup routes after auth — redirect to home */}
