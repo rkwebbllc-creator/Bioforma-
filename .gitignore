@@ -1,0 +1,13 @@
+node_modules/
+dist/
+fittrack.db
+.env
+tool_calls/
+skills/
+*.summary
+AUTH_SUMMARY.md
+PHASE2_SUMMARY.md
+SUPABASE_MIGRATION_SUMMARY.md
+MULTISCAN_SUMMARY.md
+BUILD_SUMMARY.md
+supabase-migration*.sql
