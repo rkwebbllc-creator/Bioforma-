@@ -843,6 +843,179 @@ export function registerRoutes(httpServer: ReturnType<typeof createServer>, app:
     res.json({ imported: 0, updated: 0 });
   });
 
+  // ── Regimen Consistency Score ─────────────────────────────────────────────
+  // GET /api/score — Returns a 0-100 consistency score based on last 30 days
+  app.get("/api/score", async (req, res) => {
+    const token = req.headers.authorization?.replace("Bearer ", "");
+    if (!token) return res.status(401).json({ error: "Not authenticated" });
+    const { data: { user } } = await supabase.auth.getUser(token);
+    if (!user) return res.status(401).json({ error: "Invalid token" });
+
+    try {
+      const client = createUserClient(token);
+
+      // Date range: last 30 days
+      const today = new Date();
+      const thirtyDaysAgo = new Date(today);
+      thirtyDaysAgo.setDate(today.getDate() - 30);
+      const startDate = thirtyDaysAgo.toISOString().slice(0, 10);
+
+      // Fetch all the data we need in parallel
+      const [supplementsRes, supplementLogsRes, nutritionLogsRes, inbodyRes, targetsRes] = await Promise.all([
+        client.from('supplements').select('id, active, schedule_days').eq('active', true),
+        client.from('supplement_logs').select('supplement_id, date').gte('date', startDate),
+        client.from('nutrition_logs').select('date, calories, protein').gte('date', startDate),
+        client.from('inbody_logs').select('date').gte('date', startDate),
+        client.from('daily_targets').select('calories, protein').limit(1).maybeSingle(),
+      ]);
+
+      const activeSupplements = supplementsRes.data || [];
+      const supplementLogs = supplementLogsRes.data || [];
+      const nutritionLogs = nutritionLogsRes.data || [];
+      const inbodyLogs = inbodyRes.data || [];
+      const targets = targetsRes.data || { calories: 2000, protein: 150 };
+
+      // Generate the last 30 days as an array of date strings
+      const days: string[] = [];
+      for (let i = 0; i < 30; i++) {
+        const d = new Date(today);
+        d.setDate(today.getDate() - i);
+        days.push(d.toISOString().slice(0, 10));
+      }
+
+      // Map day-of-week helper ("Sun", "Mon", etc.)
+      const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+      const getDayName = (dateStr: string) => dayNames[new Date(dateStr + 'T12:00:00Z').getDay()];
+
+      // ── COMPONENT 1: Supplement Adherence (40% weight) ──
+      // % of scheduled supplement doses actually taken over 30 days
+      let totalScheduled = 0;
+      let totalTaken = 0;
+
+      for (const day of days) {
+        const dayName = getDayName(day);
+        for (const sup of activeSupplements) {
+          let scheduled = true;
+          if (sup.schedule_days) {
+            try {
+              const sch = typeof sup.schedule_days === 'string' ? JSON.parse(sup.schedule_days) : sup.schedule_days;
+              if (Array.isArray(sch) && sch.length > 0 && sch.length < 7) {
+                scheduled = sch.includes(dayName);
+              }
+            } catch {}
+          }
+          if (scheduled) {
+            totalScheduled++;
+            const taken = supplementLogs.some(l => l.supplement_id === sup.id && l.date === day);
+            if (taken) totalTaken++;
+          }
+        }
+      }
+      const supplementScore = totalScheduled > 0 ? (totalTaken / totalScheduled) * 100 : 0;
+
+      // ── COMPONENT 2: Nutrition Logging (30% weight) ──
+      // % of days where the user logged at least one meal
+      const daysWithMeals = new Set(nutritionLogs.map(l => l.date));
+      const nutritionScore = (daysWithMeals.size / 30) * 100;
+
+      // ── COMPONENT 3: Nutrition Target Hit (20% weight) ──
+      // Among days with logs, how close to protein target (most important macro)
+      const dailyProtein: Record<string, number> = {};
+      for (const log of nutritionLogs) {
+        dailyProtein[log.date] = (dailyProtein[log.date] || 0) + (log.protein || 0);
+      }
+      const proteinTarget = targets?.protein || 150;
+      const loggedDays = Object.keys(dailyProtein);
+      let targetScore = 0;
+      if (loggedDays.length > 0) {
+        const totalRatio = loggedDays.reduce((sum, day) => {
+          const ratio = Math.min(1, dailyProtein[day] / proteinTarget);
+          return sum + ratio;
+        }, 0);
+        targetScore = (totalRatio / loggedDays.length) * 100;
+      }
+
+      // ── COMPONENT 4: Body Comp Tracking (10% weight) ──
+      // At least 2 scans in 30 days = 100, 1 scan = 50, 0 scans = 0
+      const bodyCompScore = inbodyLogs.length >= 2 ? 100 : inbodyLogs.length === 1 ? 50 : 0;
+
+      // ── OVERALL SCORE (weighted) ──
+      const overall = Math.round(
+        supplementScore * 0.40 +
+        nutritionScore * 0.30 +
+        targetScore * 0.20 +
+        bodyCompScore * 0.10
+      );
+
+      // ── STREAK: consecutive days with at least one supplement log OR meal log ──
+      let streak = 0;
+      for (const day of days) {
+        const hasSupp = supplementLogs.some(l => l.date === day);
+        const hasMeal = nutritionLogs.some(l => l.date === day);
+        if (hasSupp || hasMeal) streak++;
+        else break;
+      }
+
+      // ── GRADE ──
+      let grade: string;
+      let gradeColor: string;
+      if (overall >= 90) { grade = 'A'; gradeColor = 'hsl(142 65% 52%)'; }
+      else if (overall >= 80) { grade = 'B'; gradeColor = 'hsl(142 50% 58%)'; }
+      else if (overall >= 70) { grade = 'C'; gradeColor = 'hsl(46 95% 60%)'; }
+      else if (overall >= 60) { grade = 'D'; gradeColor = 'hsl(32 95% 58%)'; }
+      else { grade = 'F'; gradeColor = 'hsl(4 72% 62%)'; }
+
+      // ── INSIGHT (AI-like feedback based on components) ──
+      let insight = '';
+      if (overall >= 90) insight = "You're crushing it. Keep this pace to maximize your results.";
+      else if (overall >= 80) insight = "Strong consistency. Small tweaks could push you into elite territory.";
+      else if (overall >= 70) insight = "Solid foundation. Focus on the weakest area below to level up.";
+      else if (overall >= 60) insight = "You're building momentum. Log more days to see real progress.";
+      else if (overall > 0) insight = "Your regimen needs more consistency. Start with just the basics daily.";
+      else insight = "Log your first supplement or meal to start tracking your progress.";
+
+      // Find weakest component for actionable suggestion
+      const components = [
+        { name: 'Supplements', score: supplementScore, key: 'supplements' },
+        { name: 'Nutrition Logging', score: nutritionScore, key: 'nutrition' },
+        { name: 'Macro Targets', score: targetScore, key: 'targets' },
+        { name: 'Body Comp', score: bodyCompScore, key: 'body' },
+      ];
+      const weakest = components.reduce((min, c) => c.score < min.score ? c : min, components[0]);
+
+      res.json({
+        overall,
+        grade,
+        gradeColor,
+        streak,
+        insight,
+        weakest: weakest.key,
+        components: {
+          supplements: {
+            score: Math.round(supplementScore),
+            taken: totalTaken,
+            scheduled: totalScheduled,
+          },
+          nutrition: {
+            score: Math.round(nutritionScore),
+            daysLogged: daysWithMeals.size,
+            totalDays: 30,
+          },
+          targets: {
+            score: Math.round(targetScore),
+            loggedDays: loggedDays.length,
+          },
+          body: {
+            score: bodyCompScore,
+            scans: inbodyLogs.length,
+          },
+        },
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // ── Coupon Codes ─────────────────────────────────────────────────────────
 
   // POST /api/coupon/validate — check if a coupon code is valid

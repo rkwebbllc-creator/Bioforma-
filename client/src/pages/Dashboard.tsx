@@ -22,6 +22,11 @@ import {
   ChevronRight,
   Dumbbell,
   LogOut,
+  Flame as StreakFlame,
+  Trophy,
+  Target,
+  ArrowRight,
+  Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { apiRequest, queryClient, API_BASE, authFetch } from "@/lib/queryClient";
@@ -80,6 +85,21 @@ interface InBodyStats {
   muscleMass: number;
   bmi: number;
   scanDate?: string;
+}
+
+interface RegimenScore {
+  overall: number;
+  grade: "A" | "B" | "C" | "D" | "F";
+  gradeColor: string;
+  streak: number;
+  insight: string;
+  weakest: "supplements" | "nutrition" | "targets" | "body";
+  components: {
+    supplements: { score: number; taken: number; scheduled: number };
+    nutrition:   { score: number; daysLogged: number; totalDays: number };
+    targets:     { score: number; loggedDays: number };
+    body:        { score: number; scans: number };
+  };
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -696,6 +716,267 @@ function InBodySection() {
   );
 }
 
+// ─── Regimen Score Hero Card ──────────────────────────────────────────────────
+
+const WEAKEST_LINKS: Record<RegimenScore["weakest"], { label: string; href: string }> = {
+  supplements: { label: "Log your supplements",    href: "/supplements" },
+  nutrition:   { label: "Log today's meals",       href: "/nutrition" },
+  targets:     { label: "Hit your protein target", href: "/nutrition" },
+  body:        { label: "Add a body scan",         href: "/body" },
+};
+
+const COMPONENT_META: {
+  key: keyof RegimenScore["components"];
+  label: string;
+  weight: string;
+  icon: any;
+  color: string;
+}[] = [
+  { key: "supplements", label: "Supplements",    weight: "40%", icon: Pill,             color: "hsl(187 80% 55%)" },
+  { key: "nutrition",   label: "Meal Logging",   weight: "30%", icon: UtensilsCrossed,  color: "hsl(32 95% 58%)"  },
+  { key: "targets",     label: "Macro Targets",  weight: "20%", icon: Target,           color: "hsl(142 65% 50%)" },
+  { key: "body",        label: "Body Scans",     weight: "10%", icon: Scale,            color: "hsl(270 60% 68%)" },
+];
+
+function RegimenScoreCard() {
+  const { data, isLoading } = useQuery<RegimenScore>({
+    queryKey: ["/api/score"],
+    queryFn: async () => {
+      const res = await authFetch(`${API_BASE}/api/score`);
+      if (!res.ok) throw new Error(`${res.status}`);
+      return res.json();
+    },
+    retry: false,
+  });
+
+  if (isLoading) {
+    return (
+      <div
+        className="rounded-3xl border p-6 sm:p-7 space-y-5"
+        style={{ background: "hsl(220 8% 9%)", borderColor: "hsl(220 8% 16%)" }}
+      >
+        <div className="flex items-center gap-5">
+          <Skeleton className="w-28 h-28 rounded-full" />
+          <div className="flex-1 space-y-2">
+            <Skeleton className="h-5 w-40" />
+            <Skeleton className="h-8 w-28" />
+            <Skeleton className="h-3 w-64" />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {[0, 1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-16 w-full rounded-xl" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (!data) return null;
+
+  const { overall, grade, gradeColor, streak, insight, weakest, components } = data;
+
+  // Progress ring geometry
+  const size = 124;
+  const stroke = 10;
+  const radius = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const dashOffset = circumference - (overall / 100) * circumference;
+
+  const weakestAction = WEAKEST_LINKS[weakest];
+
+  return (
+    <div
+      className="relative rounded-3xl border overflow-hidden"
+      style={{
+        background:
+          `radial-gradient(1200px 300px at 0% -20%, ${gradeColor.replace(")", " / 0.18)")}, transparent 60%), hsl(220 8% 9%)`,
+        borderColor: "hsl(220 8% 16%)",
+      }}
+      data-testid="card-regimen-score"
+    >
+      {/* Top accent line */}
+      <div
+        className="absolute inset-x-0 top-0 h-0.5"
+        style={{ background: `linear-gradient(90deg, ${gradeColor}, transparent 70%)` }}
+      />
+
+      <div className="p-6 sm:p-7 space-y-6">
+        {/* Header row: Ring + grade + streak */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-5 sm:gap-7">
+          {/* Progress ring with grade letter */}
+          <div className="relative shrink-0" style={{ width: size, height: size }}>
+            <svg width={size} height={size} className="-rotate-90">
+              <circle
+                cx={size / 2}
+                cy={size / 2}
+                r={radius}
+                stroke="hsl(220 8% 14%)"
+                strokeWidth={stroke}
+                fill="none"
+              />
+              <circle
+                cx={size / 2}
+                cy={size / 2}
+                r={radius}
+                stroke={gradeColor}
+                strokeWidth={stroke}
+                strokeLinecap="round"
+                fill="none"
+                strokeDasharray={circumference}
+                strokeDashoffset={dashOffset}
+                style={{
+                  transition: "stroke-dashoffset 900ms cubic-bezier(0.2, 0.8, 0.2, 1)",
+                  filter: `drop-shadow(0 0 12px ${gradeColor.replace(")", " / 0.5)")})`,
+                }}
+              />
+            </svg>
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <span
+                className="font-black leading-none"
+                style={{
+                  fontFamily: "'Cabinet Grotesk', sans-serif",
+                  letterSpacing: "-0.05em",
+                  fontSize: 52,
+                  color: gradeColor,
+                  textShadow: `0 0 22px ${gradeColor.replace(")", " / 0.45)")}`,
+                }}
+                data-testid="text-regimen-grade"
+              >
+                {grade}
+              </span>
+              <span className="text-[10px] uppercase tracking-[0.18em] font-semibold text-muted-foreground mt-1">
+                {overall}/100
+              </span>
+            </div>
+          </div>
+
+          {/* Title + insight + streak */}
+          <div className="flex-1 min-w-0 space-y-3">
+            <div className="flex items-center gap-2">
+              <div
+                className="w-7 h-7 rounded-lg flex items-center justify-center"
+                style={{ background: `${gradeColor.replace(")", " / 0.15)")}` }}
+              >
+                <Trophy className="w-3.5 h-3.5" style={{ color: gradeColor }} />
+              </div>
+              <p className="text-[11px] uppercase tracking-[0.14em] font-bold text-muted-foreground">
+                Regimen Score · 30 Days
+              </p>
+            </div>
+
+            <h2
+              className="text-2xl sm:text-3xl font-black leading-[1.1]"
+              style={{
+                fontFamily: "'Cabinet Grotesk', sans-serif",
+                letterSpacing: "-0.03em",
+                background: `linear-gradient(135deg, hsl(0 0% 100%), ${gradeColor})`,
+                WebkitBackgroundClip: "text",
+                WebkitTextFillColor: "transparent",
+                backgroundClip: "text",
+              }}
+            >
+              {insight}
+            </h2>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <div
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-full"
+                style={{
+                  background: "hsl(32 95% 55% / 0.12)",
+                  border: "1px solid hsl(32 95% 55% / 0.25)",
+                }}
+                data-testid="badge-streak"
+              >
+                <StreakFlame className="w-3.5 h-3.5" style={{ color: "hsl(32 95% 58%)" }} />
+                <span className="text-xs font-bold" style={{ color: "hsl(32 95% 62%)" }}>
+                  {streak}
+                </span>
+                <span className="text-[11px] text-muted-foreground">
+                  {streak === 1 ? "day streak" : "day streak"}
+                </span>
+              </div>
+
+              {weakestAction && (
+                <Link href={weakestAction.href}>
+                  <div
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-full cursor-pointer hover:-translate-y-0.5 transition-transform"
+                    style={{
+                      background: "hsl(142 65% 44% / 0.1)",
+                      border: "1px solid hsl(142 65% 44% / 0.25)",
+                    }}
+                    data-testid="link-weakest-action"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" style={{ color: "hsl(142 65% 50%)" }} />
+                    <span className="text-[11px] font-semibold" style={{ color: "hsl(142 65% 60%)" }}>
+                      {weakestAction.label}
+                    </span>
+                    <ArrowRight className="w-3 h-3" style={{ color: "hsl(142 65% 50%)" }} />
+                  </div>
+                </Link>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Component breakdown */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {COMPONENT_META.map(({ key, label, weight, icon: Icon, color }) => {
+            const c = components[key];
+            const isWeakest = key === weakest;
+            return (
+              <div
+                key={key}
+                className={cn(
+                  "rounded-xl border p-3 transition-all",
+                  isWeakest && "ring-1"
+                )}
+                style={{
+                  background: "hsl(220 8% 7%)",
+                  borderColor: isWeakest ? `${color.replace(")", " / 0.4)")}` : "hsl(220 8% 14%)",
+                  boxShadow: isWeakest ? `0 0 18px ${color.replace(")", " / 0.15)")}` : undefined,
+                }}
+                data-testid={`component-${key}`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div
+                    className="w-6 h-6 rounded-md flex items-center justify-center"
+                    style={{ background: `${color.replace(")", " / 0.14)")}` }}
+                  >
+                    <Icon className="w-3 h-3" style={{ color }} />
+                  </div>
+                  <span className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
+                    {weight}
+                  </span>
+                </div>
+                <div className="flex items-baseline gap-1 mb-1">
+                  <span
+                    className="stat-number text-lg font-black"
+                    style={{ color }}
+                  >
+                    {c.score}
+                  </span>
+                  <span className="text-[10px] text-muted-foreground">/100</span>
+                </div>
+                <p className="text-[10px] font-semibold text-foreground truncate">{label}</p>
+                <div className="h-1 w-full rounded-full bg-secondary overflow-hidden mt-2">
+                  <div
+                    className="h-full rounded-full transition-all duration-700 ease-out"
+                    style={{
+                      width: `${c.score}%`,
+                      background: `linear-gradient(90deg, ${color}, ${color.replace(")", " / 0.6)")})`,
+                    }}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Dashboard Page ───────────────────────────────────────────────────────────
 
 export default function Dashboard() {
@@ -734,6 +1015,12 @@ export default function Dashboard() {
           Sign Out
         </Button>
       </div>
+
+      {/* ── Regimen Score ── */}
+      <section className="space-y-3">
+        <div className="section-label">Your Regimen</div>
+        <RegimenScoreCard />
+      </section>
 
       {/* ── Quick Actions ── */}
       <section className="space-y-3">
