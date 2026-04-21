@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { API_BASE } from "@/lib/queryClient";
+import { API_BASE, authFetch } from "@/lib/queryClient";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
@@ -508,12 +508,19 @@ export default function InBodyImport({ open, onClose }: Props) {
   const handleImport = async () => {
     setImporting(true);
     try {
-      const res = await fetch(`${API_BASE}/api/inbody/import`, {
+      const res = await authFetch(`${API_BASE}/api/inbody/import`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(rows),
       });
-      if (!res.ok) throw new Error(`Server error ${res.status}`);
+      if (!res.ok) {
+        let msg = `Server error ${res.status}`;
+        try {
+          const err = await res.json();
+          if (err?.error) msg = err.error;
+        } catch {}
+        throw new Error(msg);
+      }
       const json = await res.json();
       setImportResult({ imported: json.imported, skipped: json.skipped });
       setStage("done");
