@@ -107,6 +107,11 @@ async function authFetchHelper(method: string, url: string, token: string | null
 // ─── Token refresh interval (50 min — tokens expire at 60) ──────────────────
 const REFRESH_INTERVAL_MS = 50 * 60 * 1000;
 
+// Guard against concurrent refresh calls — Supabase rotates refresh tokens
+// on each successful use, so a second concurrent call with a now-stale token
+// produces a 401 and would log the user out. We de-duplicate by sharing a promise.
+let inFlightRefresh: Promise<any> | null = null;
+
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -116,18 +121,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshTokenRef = useRef<string | null>(null);
   const refreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  function startRefreshTimer() {
-    stopRefreshTimer();
-    refreshTimerRef.current = setInterval(async () => {
-      if (!refreshTokenRef.current) return;
+  // Shared, de-duplicated refresh function. Never throws — on failure it just
+  // leaves the existing token in place so the next real API request surfaces
+  // any real auth problem naturally instead of force-logging out.
+  async function refreshNow() {
+    if (!refreshTokenRef.current) return;
+    if (inFlightRefresh) return inFlightRefresh;
+    const current = refreshTokenRef.current;
+    inFlightRefresh = (async () => {
       try {
         const data = await authFetchHelper("POST", "/api/auth/refresh", null, {
-          refreshToken: refreshTokenRef.current,
+          refreshToken: current,
         });
         setTokenAndStore(data.token, data.refreshToken, data.user);
       } catch {
-        doLogout();
+        // Swallow: keep existing session. Don't kick the user out from a
+        // background timer — let an actual failed request decide.
+      } finally {
+        inFlightRefresh = null;
       }
+    })();
+    return inFlightRefresh;
+  }
+
+  function startRefreshTimer() {
+    stopRefreshTimer();
+    refreshTimerRef.current = setInterval(() => {
+      // Only refresh while the tab is visible — avoids racing with the
+      // visibility-change refresh on backgrounded tabs.
+      if (typeof document !== "undefined" && document.hidden) return;
+      refreshNow();
     }, REFRESH_INTERVAL_MS);
   }
 
