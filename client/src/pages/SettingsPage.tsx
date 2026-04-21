@@ -77,9 +77,7 @@ const SYNCED_METRICS = [
 ];
 
 function AppleHealthSection() {
-  const [isConnected, setIsConnected] = useState(false);
-
-  const { data: latestLog, refetch } = useQuery<HealthLog | null>({
+  const { data: latestLog } = useQuery<HealthLog | null>({
     queryKey: ["/api/health/latest"],
     queryFn: async () => {
       try {
@@ -91,13 +89,8 @@ function AppleHealthSection() {
         return null;
       }
     },
-    enabled: isConnected,
     retry: false,
   });
-
-  const syncNow = () => {
-    refetch();
-  };
 
   const lastSyncedLabel = latestLog?.date
     ? (() => {
@@ -133,76 +126,47 @@ function AppleHealthSection() {
       </CardHeader>
 
       <CardContent className="space-y-5">
-        {isConnected ? (
-          /* ── State B: Connected ── */
-          <div className="space-y-4">
+        <div className="space-y-5">
+          {lastSyncedLabel ? (
             <div className="flex flex-wrap items-center gap-3">
               <Badge className="bg-green-500/15 text-green-400 border border-green-500/25 hover:bg-green-500/20">
                 <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />
-                Connected
+                Synced from iPhone
               </Badge>
-              {lastSyncedLabel && (
-                <span className="text-xs text-muted-foreground">Last synced: {lastSyncedLabel}</span>
-              )}
+              <span className="text-xs text-muted-foreground">Last synced: {lastSyncedLabel}</span>
             </div>
-            <div className="flex items-center gap-3">
-              <Button
-                size="sm"
-                className="bg-green-600 hover:bg-green-500 text-white"
-                onClick={syncNow}
-              >
-                <Zap className="w-4 h-4 mr-1.5" />
-                Sync Now
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="text-muted-foreground hover:text-destructive"
-                onClick={() => setIsConnected(false)}
-              >
-                Disconnect
-              </Button>
+          ) : (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-300/90 leading-relaxed">
+              <span className="font-semibold text-amber-300">iPhone only.</span> Apple Health data can
+              only be read by the BioForma iOS app — browsers cannot access HealthKit. Install
+              BioForma on your iPhone and tap “Connect Apple Health” in the mobile Settings to start
+              syncing.
             </div>
-          </div>
-        ) : (
-          /* ── State A: Not connected ── */
-          <div className="space-y-5">
-            <Button
-              className="bg-green-600 hover:bg-green-500 text-white w-full sm:w-auto"
-              onClick={() => setIsConnected(true)}
-            >
-              <Heart className="w-4 h-4 mr-2" />
-              Connect Apple Health
-            </Button>
+          )}
 
-            <p className="text-sm text-muted-foreground leading-relaxed">
-              Tap Connect to authorize Apple Health access. Once connected, BioForma will
-              automatically sync your sleep, HRV, steps, and active calories twice daily.
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+              What gets synced
             </p>
-
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-                What gets synced
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {SYNCED_METRICS.map(({ label, detail }) => (
-                  <div key={label} className="flex items-start gap-2.5 p-2.5 rounded-lg bg-muted/20 border border-border">
-                    <CheckCircle2 className="w-4 h-4 text-green-500 shrink-0 mt-0.5" />
-                    <div>
-                      <p className="text-xs font-medium text-foreground">{label}</p>
-                      {detail && <p className="text-[11px] text-muted-foreground">{detail}</p>}
-                    </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {SYNCED_METRICS.map(({ label, detail }) => (
+                <div key={label} className="flex items-start gap-2.5 p-2.5 rounded-lg bg-muted/20 border border-border">
+                  <CheckCircle2 className="w-4 h-4 text-green-500 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-xs font-medium text-foreground">{label}</p>
+                    {detail && <p className="text-[11px] text-muted-foreground">{detail}</p>}
                   </div>
-                ))}
-              </div>
+                </div>
+              ))}
             </div>
-
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              Requires iPhone with Health app. Works with Apple Watch, Fitbit (via Apple Health),
-              Garmin (via Apple Health), and any app that writes to Apple Health.
-            </p>
           </div>
-        )}
+
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            Works with Apple Watch, Fitbit (via Apple Health), Garmin (via Apple Health), and any
+            app that writes to Apple Health. Sync runs when you open the BioForma iOS app, or you
+            can trigger it manually.
+          </p>
+        </div>
       </CardContent>
     </Card>
   );
