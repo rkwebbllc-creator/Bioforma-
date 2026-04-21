@@ -89,6 +89,13 @@ function getOuraSettings(userId: string) {
 }
 
 export function registerRoutes(httpServer: ReturnType<typeof createServer>, app: Express) {
+  // ── Healthcheck (used by Railway) ────────────────────────────────────────────
+  // Must be unauthenticated and always return 200 so Railway's healthcheck
+  // passes regardless of DB state or user data.
+  app.get("/api/healthz", (_req, res) => {
+    res.status(200).json({ status: "ok", uptime: process.uptime() });
+  });
+
   // ── Auth routes ──────────────────────────────────────────────────────────────
 
   // POST /api/auth/signup
