@@ -734,7 +734,7 @@ function SupplementCard({ supplement, onEdit, onDelete }: SupplementCardProps) {
 
   return (
     <div
-      className={`rounded-2xl border transition-all duration-200 hover-lift overflow-hidden ${
+      className={`rounded-2xl border hover-lift overflow-hidden ${
         supplement.active ? "" : "opacity-50"
       } ${CATEGORY_LEFT_BORDER[supplement.category] ?? "border-l-[3px] border-l-slate-500"}`}
       style={{ background: "hsl(220 8% 9%)", borderColor: "hsl(220 8% 16%)" }}
