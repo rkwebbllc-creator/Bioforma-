@@ -59,22 +59,51 @@ function storeSession(session: StoredSession) {
   } catch {}
 }
 
+// A well-formed JWT has exactly 3 base64url segments separated by dots.
+// Anything else is corrupt — reject it so we don't ship a bad header to the
+// server (which would return 500 "Expected 3 parts in JWT; got 1").
+function isValidJwtShape(token: unknown): token is string {
+  if (typeof token !== "string" || token.length < 20) return false;
+  const parts = token.split(".");
+  return parts.length === 3 && parts.every((p) => p.length > 0);
+}
+
+function isValidStoredSession(s: any): s is StoredSession {
+  return (
+    !!s &&
+    typeof s === "object" &&
+    isValidJwtShape(s.token) &&
+    typeof s.refreshToken === "string" &&
+    s.refreshToken.length > 0 &&
+    !!s.user &&
+    typeof s.user.id === "string"
+  );
+}
+
 function loadSession(): StoredSession | null {
+  // Collect candidates from every storage layer so we can pick a good one
+  // even if one layer was corrupted by an interrupted write.
+  const candidates: any[] = [];
   try {
-    // Try window variable first (fastest, always works)
     const win = (window as any)[STORAGE_KEY];
-    if (win && win.token) return win;
-    // Try sessionStorage
-    try {
-      const ss = sessionStorage.getItem(STORAGE_KEY);
-      if (ss) { const parsed = JSON.parse(ss); (window as any)[STORAGE_KEY] = parsed; return parsed; }
-    } catch {}
-    // Try localStorage
-    try {
-      const ls = localStorage.getItem(STORAGE_KEY);
-      if (ls) { const parsed = JSON.parse(ls); (window as any)[STORAGE_KEY] = parsed; return parsed; }
-    } catch {}
+    if (win) candidates.push(win);
   } catch {}
+  try {
+    const ss = sessionStorage.getItem(STORAGE_KEY);
+    if (ss) candidates.push(JSON.parse(ss));
+  } catch {}
+  try {
+    const ls = localStorage.getItem(STORAGE_KEY);
+    if (ls) candidates.push(JSON.parse(ls));
+  } catch {}
+  const valid = candidates.find(isValidStoredSession);
+  if (valid) {
+    (window as any)[STORAGE_KEY] = valid;
+    return valid as StoredSession;
+  }
+  // If we found candidates but none are valid, nuke every layer so the user
+  // gets a clean login screen instead of a perpetual "Invalid JWT" loop.
+  if (candidates.length > 0) clearSession();
   return null;
 }
 
@@ -89,7 +118,8 @@ function clearSession() {
 async function authFetchHelper(method: string, url: string, token: string | null, data?: unknown) {
   const headers: Record<string, string> = {};
   if (data) headers["Content-Type"] = "application/json";
-  if (token) headers["Authorization"] = `Bearer ${token}`;
+  // Only attach token if it looks like a real JWT — silently drop malformed ones
+  if (token && isValidJwtShape(token)) headers["Authorization"] = `Bearer ${token}`;
   const res = await fetch(`${API_BASE}${url}`, {
     method,
     headers,
@@ -99,7 +129,10 @@ async function authFetchHelper(method: string, url: string, token: string | null
     const text = await res.text();
     let msg = text;
     try { msg = JSON.parse(text).error || text; } catch {}
-    throw new Error(msg);
+    const err: any = new Error(msg);
+    err.status = res.status;
+    err.body = text;
+    throw err;
   }
   return res.json();
 }
@@ -134,9 +167,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           refreshToken: current,
         });
         setTokenAndStore(data.token, data.refreshToken, data.user);
-      } catch {
-        // Swallow: keep existing session. Don't kick the user out from a
-        // background timer — let an actual failed request decide.
+      } catch (e: any) {
+        // If the refresh token was already used by another tab/request, the
+        // current one is dead. Clear stored session so the next restore can
+        // try again cleanly, but DON'T log the user out — their current
+        // access token is still valid until its own expiry.
+        const msg = String(e?.message ?? "");
+        if (/already used|invalid refresh token|not found/i.test(msg)) {
+          refreshTokenRef.current = null;
+          clearSession();
+        }
+        // Otherwise swallow and leave everything in place — let the next real
+        // API request surface any actual auth problem.
       } finally {
         inFlightRefresh = null;
       }
@@ -184,7 +226,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     async function restore() {
       const stored = loadSession();
-      if (stored && stored.token && stored.refreshToken) {
+      if (stored && isValidJwtShape(stored.token) && stored.refreshToken) {
         // First try verifying the stored token
         try {
           setAuthToken(stored.token);
@@ -220,7 +262,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     restore();
-    return () => { cancelled = true; stopRefreshTimer(); };
+
+    // Cross-tab sync: when localStorage changes in another tab (login / logout),
+    // adopt the new session here too. Prevents "logged in on one tab, kicked
+    // out on another" state mismatches.
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== STORAGE_KEY) return;
+      if (!e.newValue) {
+        // Another tab logged out — mirror it here
+        doLogout();
+        return;
+      }
+      try {
+        const next = JSON.parse(e.newValue);
+        if (isValidStoredSession(next)) {
+          setTokenAndStore(next.token, next.refreshToken, next.user);
+          startRefreshTimer();
+        }
+      } catch {}
+    };
+    window.addEventListener("storage", onStorage);
+
+    return () => {
+      cancelled = true;
+      stopRefreshTimer();
+      window.removeEventListener("storage", onStorage);
+    };
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {

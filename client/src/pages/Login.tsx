@@ -262,6 +262,34 @@ export default function Login() {
               Sign up
             </Link>
           </p>
+
+          {/* Escape hatch: clear all local session/cache for users stuck in a
+              bad client-side auth state (e.g. corrupted token in localStorage) */}
+          <p style={{ textAlign: "center", fontSize: "0.72rem", color: "hsl(220 6% 38%)", marginTop: 12 }}>
+            Stuck in a login loop?{" "}
+            <button
+              type="button"
+              onClick={() => {
+                try { sessionStorage.removeItem("__bioforma_session__"); } catch {}
+                try { localStorage.removeItem("__bioforma_session__"); } catch {}
+                try { delete (window as any).__bioforma_session__; } catch {}
+                location.reload();
+              }}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "hsl(32 95% 58%)",
+                fontWeight: 600,
+                textDecoration: "underline",
+                cursor: "pointer",
+                padding: 0,
+                fontSize: "0.72rem",
+              }}
+              data-testid="button-clear-session"
+            >
+              Reset session
+            </button>
+          </p>
         </div>
       </div>
 
