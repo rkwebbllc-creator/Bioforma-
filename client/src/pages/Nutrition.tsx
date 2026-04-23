@@ -16,9 +16,14 @@ import {
   Flame,
   Bell,
   BellOff,
+  Camera,
+  Loader2,
+  Sparkles,
+  X as XIcon,
 } from "lucide-react";
+import { useRef } from "react";
 
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, authFetch, API_BASE } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
 import { Button } from "@/components/ui/button";
@@ -471,6 +476,335 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
   );
 }
 
+// ── Scan Label Button ────────────────────────────────────────────
+
+/** Macros extracted from a nutrition label. Aligned with server schema. */
+interface ScanResult {
+  product_name?: string | null;
+  serving_size?: string;
+  servings_per_container?: number | null;
+  calories?: number;
+  protein_g?: number;
+  carbs_g?: number;
+  fat_g?: number;
+  saturated_fat_g?: number;
+  trans_fat_g?: number;
+  fiber_g?: number;
+  sugar_g?: number;
+  added_sugar_g?: number;
+  sodium_mg?: number;
+  cholesterol_mg?: number;
+  potassium_mg?: number;
+  confidence?: "high" | "medium" | "low";
+}
+
+/** Read a File into a data URL (base64) — keeps the logic in one place. */
+function readFileAsDataURL(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error ?? new Error("Failed to read file"));
+    reader.onload = () => resolve(String(reader.result));
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * Downscale an image to a max dimension (keeps aspect ratio) and return base64 JPEG.
+ * Keeps upload payload small enough for the 10MB body limit on Railway and reduces
+ * latency to Claude's vision endpoint. 1600px is plenty for OCR on nutrition labels.
+ */
+async function compressImage(file: File, maxDim = 1600, quality = 0.85): Promise<{ base64: string; mediaType: string }> {
+  const dataUrl = await readFileAsDataURL(file);
+  const img = new Image();
+  await new Promise<void>((resolve, reject) => {
+    img.onload = () => resolve();
+    img.onerror = () => reject(new Error("Could not decode image"));
+    img.src = dataUrl;
+  });
+  const { width, height } = img;
+  const scale = Math.min(1, maxDim / Math.max(width, height));
+  const w = Math.round(width * scale);
+  const h = Math.round(height * scale);
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas 2d context unavailable");
+  ctx.drawImage(img, 0, 0, w, h);
+  const jpeg = canvas.toDataURL("image/jpeg", quality);
+  return { base64: jpeg, mediaType: "image/jpeg" };
+}
+
+interface ScanLabelButtonProps {
+  onExtracted: (result: ScanResult, servings: number) => void;
+}
+
+/**
+ * Triggers the iPhone/Android camera (via `capture="environment"` on the file input),
+ * uploads the image to /api/nutrition/scan-label, previews the extracted macros in a
+ * confirmation sheet with a servings multiplier, and finally calls `onExtracted` with
+ * the scaled values so the parent form can populate itself.
+ */
+function ScanLabelButton({ onExtracted }: ScanLabelButtonProps) {
+  const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [preview, setPreview] = useState<{ dataUrl: string; result: ScanResult; servings: number } | null>(null);
+
+  const openCamera = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    // Reset the input so selecting the same file twice still triggers onChange
+    e.target.value = "";
+
+    setScanning(true);
+    try {
+      const { base64, mediaType } = await compressImage(file);
+      const res = await authFetch(`${API_BASE}/api/nutrition/scan-label`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageBase64: base64, mediaType }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(payload?.error || `Scan failed (${res.status})`);
+      }
+      setPreview({ dataUrl: base64, result: payload as ScanResult, servings: 1 });
+      setPreviewOpen(true);
+    } catch (err: any) {
+      toast({
+        title: "Scan failed",
+        description: err?.message || "Try a clearer, straighter photo of the Nutrition Facts panel.",
+        variant: "destructive",
+      });
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  const applyToForm = () => {
+    if (!preview) return;
+    onExtracted(preview.result, preview.servings);
+    setPreviewOpen(false);
+    setPreview(null);
+    toast({ title: "Macros filled in", description: "Review the values, then save your meal." });
+  };
+
+  const servings = preview?.servings ?? 1;
+  const r = preview?.result;
+  const scaled = r ? {
+    calories: Math.round((r.calories ?? 0) * servings),
+    protein: +((r.protein_g ?? 0) * servings).toFixed(1),
+    carbs:   +((r.carbs_g ?? 0) * servings).toFixed(1),
+    fat:     +((r.fat_g ?? 0) * servings).toFixed(1),
+    fiber:   +((r.fiber_g ?? 0) * servings).toFixed(1),
+    sugar:   +((r.sugar_g ?? 0) * servings).toFixed(1),
+    sodium:  Math.round((r.sodium_mg ?? 0) * servings),
+  } : null;
+
+  return (
+    <>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        onChange={handleFile}
+        className="hidden"
+        data-testid="input-label-photo"
+      />
+      <Button
+        type="button"
+        variant="outline"
+        onClick={openCamera}
+        disabled={scanning}
+        className="w-full gap-2 border-emerald-500/30 bg-emerald-500/5 text-emerald-300 hover:bg-emerald-500/10 hover:text-emerald-200"
+        data-testid="button-scan-label"
+      >
+        {scanning ? (
+          <>
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Reading label…
+          </>
+        ) : (
+          <>
+            <Camera className="w-4 h-4" />
+            Scan Nutrition Label
+            <Sparkles className="w-3 h-3 opacity-70" />
+          </>
+        )}
+      </Button>
+
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="sm:max-w-[500px] bg-card border-border">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-emerald-400" />
+              Nutrition label scanned
+            </DialogTitle>
+          </DialogHeader>
+
+          {preview && r && scaled && (
+            <div className="space-y-4">
+              {/* Photo + product name */}
+              <div className="flex gap-3 items-start">
+                <img
+                  src={preview.dataUrl}
+                  alt="Label"
+                  className="w-20 h-20 rounded-lg object-cover border border-border shrink-0"
+                />
+                <div className="flex-1 min-w-0">
+                  {r.product_name && (
+                    <p className="text-sm font-semibold text-foreground truncate">{r.product_name}</p>
+                  )}
+                  {r.serving_size && (
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Serving: {r.serving_size}
+                    </p>
+                  )}
+                  {r.confidence && (
+                    <Badge
+                      variant="outline"
+                      className={`mt-1.5 text-[10px] ${
+                        r.confidence === "high"
+                          ? "border-emerald-500/40 text-emerald-300"
+                          : r.confidence === "medium"
+                          ? "border-amber-500/40 text-amber-300"
+                          : "border-red-500/40 text-red-300"
+                      }`}
+                    >
+                      {r.confidence} confidence
+                    </Badge>
+                  )}
+                </div>
+              </div>
+
+              {/* Servings multiplier */}
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  How many servings did you eat?
+                </label>
+                <div className="flex items-center gap-2 mt-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-9 w-9"
+                    onClick={() =>
+                      setPreview((p) => (p ? { ...p, servings: Math.max(0.25, +(p.servings - 0.25).toFixed(2)) } : p))
+                    }
+                    data-testid="button-servings-dec"
+                  >
+                    <ChevronDown className="w-4 h-4" />
+                  </Button>
+                  <Input
+                    type="number"
+                    step="0.25"
+                    min="0.25"
+                    value={servings}
+                    onChange={(e) =>
+                      setPreview((p) =>
+                        p ? { ...p, servings: Math.max(0.25, parseFloat(e.target.value) || 0.25) } : p,
+                      )
+                    }
+                    className="h-9 w-24 text-center tabular-nums"
+                    data-testid="input-servings"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-9 w-9"
+                    onClick={() =>
+                      setPreview((p) => (p ? { ...p, servings: +(p.servings + 0.25).toFixed(2) } : p))
+                    }
+                    data-testid="button-servings-inc"
+                  >
+                    <ChevronUp className="w-4 h-4" />
+                  </Button>
+                  <div className="flex gap-1 ml-auto">
+                    {[0.5, 1, 1.5, 2].map((n) => (
+                      <button
+                        key={n}
+                        type="button"
+                        onClick={() => setPreview((p) => (p ? { ...p, servings: n } : p))}
+                        className={`text-xs px-2 py-1 rounded-md border transition-colors ${
+                          servings === n
+                            ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300"
+                            : "border-border text-muted-foreground hover:text-foreground"
+                        }`}
+                        data-testid={`button-servings-${n}`}
+                      >
+                        {n}×
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Macros preview */}
+              <div className="grid grid-cols-2 gap-2">
+                <MacroPreviewPill label="Calories" value={scaled.calories} unit="kcal" tone="foreground" />
+                <MacroPreviewPill label="Protein"  value={scaled.protein}  unit="g"   tone="emerald" />
+                <MacroPreviewPill label="Carbs"    value={scaled.carbs}    unit="g"   tone="blue" />
+                <MacroPreviewPill label="Fat"      value={scaled.fat}      unit="g"   tone="amber" />
+                {r.fiber_g != null && <MacroPreviewPill label="Fiber"  value={scaled.fiber}  unit="g"  tone="muted" />}
+                {r.sugar_g != null && <MacroPreviewPill label="Sugar"  value={scaled.sugar}  unit="g"  tone="muted" />}
+                {r.sodium_mg != null && <MacroPreviewPill label="Sodium" value={scaled.sodium} unit="mg" tone="muted" />}
+              </div>
+
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                Tip: AI can misread smudged or angled labels — review the values before saving. Only calories, protein, carbs, and fat are stored; the others are shown for reference.
+              </p>
+            </div>
+          )}
+
+          <DialogFooter className="gap-2">
+            <Button type="button" variant="ghost" onClick={() => setPreviewOpen(false)}>
+              <XIcon className="w-4 h-4 mr-1" />
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={applyToForm}
+              className="bg-emerald-500 hover:bg-emerald-500/90 text-black font-semibold"
+              data-testid="button-apply-scan"
+            >
+              Use these values
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+function MacroPreviewPill({
+  label, value, unit, tone,
+}: { label: string; value: number; unit: string; tone: "emerald" | "blue" | "amber" | "muted" | "foreground" }) {
+  const toneMap: Record<string, string> = {
+    emerald:    "text-emerald-300 border-emerald-500/25 bg-emerald-500/5",
+    blue:       "text-blue-300 border-blue-500/25 bg-blue-500/5",
+    amber:      "text-amber-300 border-amber-500/25 bg-amber-500/5",
+    foreground: "text-foreground border-border bg-muted/20",
+    muted:      "text-muted-foreground border-border bg-muted/10",
+  };
+  return (
+    <div className={`rounded-lg border px-3 py-2 ${toneMap[tone]}`}>
+      <p className="text-[10px] uppercase tracking-wider opacity-80 font-semibold">{label}</p>
+      <p className="text-base font-bold tabular-nums">
+        {value}
+        <span className="text-[10px] ml-1 opacity-70 font-normal">{unit}</span>
+      </p>
+    </div>
+  );
+}
+
 // ── Meal Form Dialog ────────────────────────────────────────────────────────
 
 interface MealDialogProps {
@@ -569,6 +903,48 @@ function MealDialog({ open, onOpenChange, log, selectedDate }: MealDialogProps) 
 
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+            {/* Scan nutrition label — camera OCR via Claude vision */}
+            <ScanLabelButton
+              onExtracted={(result, servings) => {
+                const mult = servings || 1;
+                // Auto-fill name if the user hasn't typed one yet
+                if (!form.getValues("mealName") && result.product_name) {
+                  form.setValue("mealName", result.product_name, { shouldValidate: true });
+                }
+                if (result.calories != null) {
+                  form.setValue("calories", Math.round(result.calories * mult) as any, { shouldValidate: true });
+                }
+                if (result.protein_g != null) {
+                  form.setValue("protein", +(result.protein_g * mult).toFixed(1) as any, { shouldValidate: true });
+                }
+                if (result.carbs_g != null) {
+                  form.setValue("carbs", +(result.carbs_g * mult).toFixed(1) as any, { shouldValidate: true });
+                }
+                if (result.fat_g != null) {
+                  form.setValue("fat", +(result.fat_g * mult).toFixed(1) as any, { shouldValidate: true });
+                }
+                // Drop serving info in notes so the user remembers the source
+                const meta = [
+                  result.serving_size ? `${mult}× ${result.serving_size}` : null,
+                  result.sodium_mg != null ? `sodium ${Math.round(result.sodium_mg * mult)}mg` : null,
+                  result.fiber_g != null ? `fiber ${+(result.fiber_g * mult).toFixed(1)}g` : null,
+                  result.sugar_g != null ? `sugar ${+(result.sugar_g * mult).toFixed(1)}g` : null,
+                ].filter(Boolean).join(" · ");
+                if (meta) {
+                  const existing = form.getValues("notes") ?? "";
+                  const note = `Scanned: ${meta}`;
+                  form.setValue("notes", existing ? `${existing}\n${note}` : note);
+                }
+              }}
+            />
+
+            <div className="relative py-1">
+              <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-border" /></div>
+              <div className="relative flex justify-center text-[10px] uppercase tracking-widest text-muted-foreground">
+                <span className="bg-card px-2">or enter manually</span>
+              </div>
+            </div>
+
             {/* Meal Name */}
             <FormField
               control={form.control}

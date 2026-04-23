@@ -1199,6 +1199,121 @@ export function registerRoutes(httpServer: ReturnType<typeof createServer>, app:
 
   // ── AI Chat ─────────────────────────────────────────────────────────────────
 
+  // Nutrition Label Vision Scan
+  app.post("/api/nutrition/scan-label", async (req, res) => {
+    const authUser = await getAuthUser(req);
+    if (!authUser) return res.status(401).json({ error: "Not authenticated" });
+
+    const { imageBase64, mediaType } = req.body as {
+      imageBase64?: string;
+      mediaType?: string;
+    };
+    if (!imageBase64 || typeof imageBase64 !== "string") {
+      return res.status(400).json({ error: "imageBase64 required" });
+    }
+    // Strip any "data:image/jpeg;base64," prefix
+    const raw = imageBase64.replace(/^data:image\/[a-zA-Z]+;base64,/, "");
+    const detectedType =
+      mediaType && ["image/jpeg", "image/png", "image/webp", "image/gif"].includes(mediaType)
+        ? mediaType
+        : "image/jpeg";
+    // Reject huge payloads (~3MB raw image)
+    if (raw.length > 7_000_000) {
+      return res.status(413).json({ error: "Image too large. Please use a smaller photo." });
+    }
+
+    try {
+      const Anthropic = require("@anthropic-ai/sdk");
+      const client = new Anthropic.default();
+
+      const SYSTEM = `You are a nutrition label OCR and extraction specialist. Your job: read a photo of a packaged food's Nutrition Facts panel and return a strict JSON object with the macros per serving.
+
+Rules:
+1. Return ONLY valid JSON — no prose, no markdown fences, no commentary.
+2. If the image is clearly NOT a nutrition label (e.g. a selfie, menu, ingredient-only list), return {"error": "not_nutrition_label"}.
+3. If the label is too blurry / cropped to read, return {"error": "unreadable", "reason": "<brief reason>"}.
+4. Values represent ONE serving (not the whole container). Use the "Amount Per Serving" column.
+5. All numeric fields must be numbers (not strings). Use 0 when the label lists "0g" or "-". OMIT the key entirely when the nutrient is not listed at all.
+6. serving_size should be a human-readable string like "1 cup (244 g)" or "2 tbsp (30 ml)".
+
+JSON schema to follow (omit keys you can't read):
+{
+  "product_name": string | null,
+  "serving_size": string,
+  "servings_per_container": number | null,
+  "calories": number,
+  "protein_g": number,
+  "carbs_g": number,
+  "fat_g": number,
+  "saturated_fat_g": number,
+  "trans_fat_g": number,
+  "fiber_g": number,
+  "sugar_g": number,
+  "added_sugar_g": number,
+  "sodium_mg": number,
+  "cholesterol_mg": number,
+  "potassium_mg": number,
+  "confidence": "high" | "medium" | "low"
+}`;
+
+      const response = await client.messages.create({
+        model: "claude_sonnet_4_6",
+        max_tokens: 1024,
+        system: SYSTEM,
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "image",
+                source: { type: "base64", media_type: detectedType, data: raw },
+              },
+              {
+                type: "text",
+                text: "Extract the nutrition facts from this label. Return JSON only.",
+              },
+            ],
+          },
+        ],
+      });
+
+      const textBlock = (response.content || []).find((b: any) => b.type === "text");
+      const rawText = (textBlock?.text || "").trim();
+      const cleaned = rawText
+        .replace(/^```(?:json)?\s*/i, "")
+        .replace(/\s*```$/i, "")
+        .trim();
+
+      let parsed: any;
+      try {
+        parsed = JSON.parse(cleaned);
+      } catch {
+        return res.status(422).json({
+          error:
+            "Could not parse the nutrition label. Try a clearer, straighter photo with the whole panel visible.",
+          raw: cleaned.slice(0, 500),
+        });
+      }
+
+      if (parsed?.error === "not_nutrition_label") {
+        return res.status(422).json({
+          error:
+            "This doesn't look like a nutrition label. Please snap the Nutrition Facts panel directly.",
+        });
+      }
+      if (parsed?.error === "unreadable") {
+        return res.status(422).json({
+          error: `Couldn't read the label — ${parsed.reason || "try again with better lighting"}.`,
+        });
+      }
+
+      res.json(parsed);
+    } catch (e: any) {
+      console.error("[scan-label]", e);
+      res.status(500).json({ error: e?.message || "Scan failed" });
+    }
+  });
+
   app.post("/api/chat", async (req, res) => {
     const { messages } = req.body as { messages: { role: string; content: string }[] };
     if (!messages?.length) return res.status(400).json({ error: "messages required" });

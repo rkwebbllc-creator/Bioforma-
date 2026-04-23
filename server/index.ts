@@ -14,13 +14,15 @@ declare module "http" {
 
 app.use(
   express.json({
+    // 10MB accommodates base64-encoded nutrition label photos (~3MB raw)
+    limit: "10mb",
     verify: (req, _res, buf) => {
       req.rawBody = buf;
     },
   }),
 );
 
-app.use(express.urlencoded({ extended: false }));
+app.use(express.urlencoded({ extended: false, limit: "10mb" }));
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
