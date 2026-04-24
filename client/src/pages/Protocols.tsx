@@ -933,7 +933,7 @@ function ProtocolCard({
 
         {/* Add Supplement Dialog */}
         <Dialog open={showAddSupp} onOpenChange={setShowAddSupp}>
-          <DialogContent className="bg-gray-900 border-gray-700 text-gray-100 sm:max-w-md">
+          <DialogContent className="bg-gray-900 border-gray-700 text-gray-100 sm:max-w-md max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="text-gray-100">Add Supplement to Protocol</DialogTitle>
             </DialogHeader>
@@ -1328,7 +1328,7 @@ export default function Protocols() {
 
       {/* Add / Edit Protocol Dialog */}
       <Dialog open={protocolDialog.open} onOpenChange={closeProtocolDialog}>
-        <DialogContent className="bg-gray-900 border-gray-700 text-gray-100 sm:max-w-lg">
+        <DialogContent className="bg-gray-900 border-gray-700 text-gray-100 sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-gray-100">
               {protocolDialog.editing ? "Edit Protocol" : "New Protocol"}

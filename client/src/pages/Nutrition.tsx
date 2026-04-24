@@ -894,15 +894,18 @@ function MealDialog({ open, onOpenChange, log, selectedDate }: MealDialogProps) 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px] bg-card border-border">
-        <DialogHeader>
+      {/* Scrollable body with fixed header/footer so the save button is always
+         reachable on phones. */}
+      <DialogContent className="sm:max-w-[500px] bg-card border-border max-h-[90vh] p-0 flex flex-col gap-0">
+        <DialogHeader className="px-6 pt-6 pb-3 border-b border-border/60 shrink-0">
           <DialogTitle className="text-foreground">
             {isEdit ? "Edit Meal" : "Log a Meal"}
           </DialogTitle>
         </DialogHeader>
 
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+          <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col min-h-0 flex-1">
+            <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4 space-y-4 overscroll-contain">
             {/* Scan nutrition label — camera OCR via Claude vision */}
             <ScanLabelButton
               onExtracted={(result, servings) => {
@@ -1075,7 +1078,9 @@ function MealDialog({ open, onOpenChange, log, selectedDate }: MealDialogProps) 
               )}
             />
 
-            <DialogFooter>
+            </div>
+
+            <DialogFooter className="px-6 py-4 border-t border-border/60 shrink-0">
               <Button
                 type="button"
                 variant="outline"

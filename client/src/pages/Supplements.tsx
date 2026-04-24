@@ -484,15 +484,22 @@ function SupplementDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[480px] bg-card border-border">
-        <DialogHeader>
+      {/* max-h + flex column lets only the form body scroll while the header and
+         footer stay fixed — otherwise on phones the modal extends past the viewport
+         and the Add Supplement button drops below the fold unreachable. */}
+      <DialogContent className="sm:max-w-[480px] bg-card border-border max-h-[90vh] p-0 flex flex-col gap-0">
+        <DialogHeader className="px-6 pt-6 pb-3 border-b border-border/60 shrink-0">
           <DialogTitle className="text-foreground">
             {isEdit ? "Edit Supplement" : "Add Supplement"}
           </DialogTitle>
         </DialogHeader>
 
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+          <form
+            onSubmit={form.handleSubmit(onSubmit)}
+            className="flex flex-col min-h-0 flex-1"
+          >
+            <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4 space-y-4 overscroll-contain">
             {/* Name */}
             <FormField
               control={form.control}
@@ -686,7 +693,9 @@ function SupplementDialog({
               )}
             />
 
-            <DialogFooter>
+            </div>
+
+            <DialogFooter className="px-6 py-4 border-t border-border/60 shrink-0">
               <Button
                 type="button"
                 variant="outline"
