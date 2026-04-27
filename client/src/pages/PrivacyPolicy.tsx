@@ -1,7 +1,7 @@
 import { Link } from "wouter";
 import { ArrowLeft } from "lucide-react";
 
-const LAST_UPDATED = "April 12, 2026";
+const LAST_UPDATED = "April 26, 2026";
 
 function Section({ num, title, children }: { num: number; title: string; children: React.ReactNode }) {
   return (
@@ -182,14 +182,17 @@ export default function PrivacyPolicy() {
         {/* Section 3 */}
         <Section num={3} title="Data Storage & Security">
           <p>
-            Your data is stored on secure servers. We implement industry-standard security measures
-            including:
+            BioForma uses Supabase (a managed Postgres provider hosted on AWS) for primary data
+            storage. All your health, supplement, nutrition, and body composition data is stored
+            encrypted at rest in our Supabase database, located in U.S. AWS regions. We implement
+            industry-standard security measures including:
           </p>
           <ul className="list-disc list-inside space-y-1.5 ml-1">
-            <li>Passwords hashed using bcrypt with a cryptographic salt</li>
-            <li>Session authentication via secure, randomly generated tokens</li>
-            <li>HTTPS encryption for all data in transit</li>
-            <li>Restricted access controls for server-side data</li>
+            <li>Authentication tokens issued by Supabase Auth (JWT-based, rotating refresh tokens)</li>
+            <li>Row-Level Security (RLS) policies that prevent any user from reading or writing another user's data</li>
+            <li>HTTPS / TLS 1.2+ encryption for all data in transit</li>
+            <li>Encryption at rest for the underlying Supabase Postgres database</li>
+            <li>Restricted access controls and least-privilege server credentials</li>
           </ul>
           <p>
             <strong style={{ color: "hsl(220 8% 76%)" }}>We do not sell your personal data to third parties.</strong> Your health and body composition data is never shared with advertisers or data brokers.
@@ -227,6 +230,39 @@ export default function PrivacyPolicy() {
               payment through the App Store or Google Play. No health or body composition data is
               shared with RevenueCat. RevenueCat's privacy policy governs their handling of billing
               data.
+            </p>
+          </SubSection>
+
+          <SubSection title="4.4 Supabase (Database & Authentication)">
+            <p>
+              Supabase is BioForma's primary backend database and authentication provider. When you
+              sign up, log in, or save data in BioForma, your account record (email, hashed password
+              equivalent, profile info) and your supplement, nutrition, body composition, and health
+              metrics records are written to a Supabase Postgres database hosted in U.S. AWS regions.
+              Supabase's privacy policy and security practices govern their handling of this data.
+              Per-user Row-Level Security ensures other users cannot access your data even at the
+              database level.
+            </p>
+          </SubSection>
+
+          <SubSection title="4.5 Nutrition Label Photo Scanning (Anthropic Vision)">
+            <p>
+              When you tap “Scan Nutrition Label” to photograph a packaged food, the photo is sent
+              to Anthropic's Claude vision API for the sole purpose of extracting the macronutrient
+              values from the Nutrition Facts panel. The image is processed in real-time, used only
+              to return the structured nutrition data, and is not stored by BioForma after the
+              extraction completes. Per Anthropic's API terms, images sent through their API are not
+              used to train Anthropic's models. Only the extracted text values (calories, protein,
+              carbs, fat, etc.) are saved to your nutrition log.
+            </p>
+          </SubSection>
+
+          <SubSection title="4.6 Railway (Application Hosting)">
+            <p>
+              BioForma's web application and API server are hosted on Railway, a U.S.-based
+              infrastructure provider. Railway's role is limited to running the application servers
+              that route your requests — they do not have access to your account credentials and
+              they do not store your health data. Your data lives in Supabase, not on Railway.
             </p>
           </SubSection>
         </Section>
