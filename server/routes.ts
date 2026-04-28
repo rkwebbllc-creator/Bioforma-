@@ -1257,7 +1257,7 @@ JSON schema to follow (omit keys you can't read):
 }`;
 
       const response = await client.messages.create({
-        model: "claude_sonnet_4_6",
+        model: "claude-sonnet-4-5",
         max_tokens: 1024,
         system: SYSTEM,
         messages: [
@@ -1346,7 +1346,7 @@ Always:
 You are integrated into FitTrack, a supplement and nutrition tracker app. Users may ask about their own stack or general research questions.`;
 
       const stream = await client.messages.stream({
-        model: "claude_sonnet_4_6",
+        model: "claude-sonnet-4-5",
         max_tokens: 1024,
         system: SYSTEM,
         messages: messages.map((m: any) => ({ role: m.role, content: m.content })),
@@ -1426,7 +1426,7 @@ Always note: consult a healthcare provider before making changes.`;
       }
 
       const stream = await client.messages.stream({
-        model: "claude_sonnet_4_6",
+        model: "claude-sonnet-4-5",
         max_tokens: 1500,
         system: systemPrompt,
         messages: messages.map((m: any) => ({ role: m.role, content: m.content })),
@@ -1568,7 +1568,7 @@ IMPORTANT: Be specific with numbers. Reference their actual data. Keep each sect
 Always note: consult a healthcare provider before changing peptide protocols.`;
 
       const stream = await client.messages.stream({
-        model: "claude_sonnet_4_6",
+        model: "claude-sonnet-4-5",
         max_tokens: 2000,
         system: SYSTEM_PROMPT,
         messages: [{ role: "user", content: `Generate my weekly optimization plan for goal: ${goal}. Base it entirely on my current data above.` }],
